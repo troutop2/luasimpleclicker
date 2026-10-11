@@ -4,12 +4,16 @@ local pointsPerClick = 1
 local upgradeCost = 10
 local frogCount = 0
 local frogCost = 10
+local frogCap = 50
 local dimondCount = 0
 local dimondCost = 2000
 local duplicateMelonsCost = 100
 local duplicateMelonsPurchased = false
 local exponentialUpgradeCost = 100
 local exponentialUpgradeCount = 0
+local drugFrogsCost = 50000
+local drugFrogsCount = 0
+local drugFrogsCap = 5
 local killMultiplier = 1
 local frogTimer = 0
 local dimondTimer = 0
@@ -28,7 +32,8 @@ local commandTargets = {
     frogs = {
         label = "frogs",
         get = function() return frogCount end,
-        set = function(value) frogCount = value end
+        set = function(value) frogCount = value end,
+        max = frogCap
     },
     dimonds = {
         label = "dimonds",
@@ -39,6 +44,12 @@ local commandTargets = {
         label = "exponents",
         get = function() return exponentialUpgradeCount end,
         set = function(value) exponentialUpgradeCount = value end
+    },
+    drug = {
+        label = "drug upgrades",
+        get = function() return drugFrogsCount end,
+        set = function(value) drugFrogsCount = value end,
+        max = drugFrogsCap
     }
 }
 
@@ -49,6 +60,19 @@ local hirefrogsBtn = { x = 240, y = 380, w = 200, h = 60 }
 local duplicateMelonsBtn = { x = 20, y = 200, w = 200, h = 60 }
 local exponentialBtn = { x = 20, y = 280, w = 200, h = 60 }
 local hireDimondsBtn = { x = 20, y = 360, w = 200, h = 60 }
+local drugFrogsBtn = { x = 20, y = 440, w = 200, h = 60 }
+local buttons = {
+    clickBtn,
+    upgradeBtn,
+    hirefrogsBtn,
+    duplicateMelonsBtn,
+    exponentialBtn,
+    hireDimondsBtn,
+    drugFrogsBtn
+}
+local buttonPressDuration = 0.24
+local buttonPressAmount = 0.08
+local melonPressTime = 0
 
 local titleFont
 local scoreFont
@@ -57,9 +81,14 @@ local buttonFont
 local greenButtonTexture
 local grayButtonTexture
 local melonTexture
+local backgroundTexture
+local backgroundQuad
+local backgroundOffsetX = 0
+local backgroundOffsetY = 0
 local melonRotation = 0
 local miniMelonAnimationTime = 0
 local melonDisplayHeight = 220
+local orbitingMelons = {}
 
 function love.load()
     titleFont = love.graphics.newFont("assets/PressStart2P-Regular.ttf", 18, "mono")
@@ -69,11 +98,34 @@ function love.load()
 
     greenButtonTexture = love.graphics.newImage("assets/greenbutton.png")
     grayButtonTexture = love.graphics.newImage("assets/graybutton.png")
+    backgroundTexture = love.graphics.newImage("assets/brickwall.png")
+    backgroundTexture:setFilter("nearest", "nearest")
+    backgroundTexture:setWrap("repeat", "repeat")
+    backgroundQuad = love.graphics.newQuad(
+        backgroundOffsetX,
+        backgroundOffsetY,
+        love.graphics.getWidth(),
+        love.graphics.getHeight(),
+        backgroundTexture:getDimensions()
+    )
     melonTexture = love.graphics.newImage("melonport_invis.png")
     melonTexture:setFilter("nearest", "nearest")
 
     local iconData = love.image.newImageData("melonport_invis.png")
     love.window.setIcon(iconData)
+
+end
+
+function love.resize(width, height)
+    if backgroundTexture then
+        backgroundQuad = love.graphics.newQuad(
+            backgroundOffsetX,
+            backgroundOffsetY,
+            width,
+            height,
+            backgroundTexture:getDimensions()
+        )
+    end
 end
 
 function love.keypressed(key)
@@ -86,7 +138,7 @@ function love.keypressed(key)
         if key == "return" or key == "kpenter" then
             local input = commandInput:match("^%s*(.-)%s*$")
             if input:lower() == "help" then
-                commandStatus = "set/add/sub <kills|frogs|dimonds|exponents> <amount>"
+                commandStatus = "set/add/sub <kills|frogs|dimonds|exponents|drug> <amount>"
             else
                 local action, targetName, amountText = input:match("^(%a+)%s+(%a+)%s+(%d+)$")
                 local amount = tonumber(amountText)
@@ -94,19 +146,25 @@ function love.keypressed(key)
                 if action and target and amount and amount < math.huge then
                     action = action:lower()
                     local currentValue = target.get()
+                    local newValue
                     if action == "set" then
-                        target.set(amount)
-                        commandStatus = target.label .. " set to " .. amount
+                        newValue = amount
                     elseif action == "add" then
-                        target.set(currentValue + amount)
-                        commandStatus = "Added " .. amount .. " " .. target.label
-                    elseif action == "sub" and currentValue >= amount then
-                        target.set(currentValue - amount)
-                        commandStatus = "Subtracted " .. amount .. " " .. target.label
+                        newValue = currentValue + amount
                     elseif action == "sub" then
-                        commandStatus = "Not enough " .. target.label
+                        newValue = currentValue - amount
                     else
                         commandStatus = "Unknown action. Type help"
+                    end
+                    if newValue then
+                        if newValue < 0 then
+                            commandStatus = "Not enough " .. target.label
+                        elseif target.max and newValue > target.max then
+                            commandStatus = "Drug upgrades are capped at " .. target.max
+                        else
+                            target.set(newValue)
+                            commandStatus = target.label .. " set to " .. newValue
+                        end
                     end
                 else
                     commandStatus = "Invalid command. Type help"
@@ -137,9 +195,40 @@ local function killMelons(amount)
     points = points + amount
     lifetimeKills = lifetimeKills + amount
     killsSinceSample = killsSinceSample + amount
+
+    local nextMilestone = 10 ^ (#orbitingMelons + 1)
+    while lifetimeKills >= nextMilestone do
+        table.insert(orbitingMelons, {
+            height = love.math.random(-55, 55),
+            bobPhase = love.math.random() * 2 * math.pi,
+            bobSpeed = 0.8 + love.math.random() * 1.2
+        })
+        nextMilestone = 10 ^ (#orbitingMelons + 1)
+    end
+end
+
+local function getPressScale(pressTime)
+    local progress = math.min(1, math.max(0, 1 - pressTime / buttonPressDuration))
+    local scale
+    if progress < 0.35 then
+        local t = progress / 0.35
+        scale = 1 - buttonPressAmount * t * t * (3 - 2 * t)
+    elseif progress < 0.7 then
+        local t = (progress - 0.35) / 0.35
+        scale = 1 - buttonPressAmount + 0.105 * t * t * (3 - 2 * t)
+    else
+        local t = (progress - 0.7) / 0.3
+        scale = 1.025 - 0.025 * t * t * (3 - 2 * t)
+    end
+    return scale
 end
 
 local function drawButtonTexture(texture, button)
+    local scale = getPressScale(button.pressTime or 0)
+    love.graphics.push()
+    love.graphics.translate(button.x + button.w / 2, button.y + button.h / 2)
+    love.graphics.scale(scale, scale)
+    love.graphics.translate(-button.x - button.w / 2, -button.y - button.h / 2)
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.draw(
         texture,
@@ -149,6 +238,17 @@ local function drawButtonTexture(texture, button)
         button.w / texture:getWidth(),
         button.h / texture:getHeight()
     )
+    love.graphics.pop()
+end
+
+local function printfButton(text, button, yOffset)
+    local scale = getPressScale(button.pressTime or 0)
+    love.graphics.push()
+    love.graphics.translate(button.x + button.w / 2, button.y + button.h / 2)
+    love.graphics.scale(scale, scale)
+    love.graphics.translate(-button.x - button.w / 2, -button.y - button.h / 2)
+    love.graphics.printf(text, button.x, button.y + yOffset, button.w, "center")
+    love.graphics.pop()
 end
 
 function love.mousepressed(x, y, button)
@@ -160,6 +260,26 @@ function love.mousepressed(x, y, button)
             return
         end
         commandFocused = false
+
+        for _, clickableButton in ipairs(buttons) do
+            if pointInRect(x, y, clickableButton.x, clickableButton.y, clickableButton.w, clickableButton.h) then
+                clickableButton.pressTime = buttonPressDuration
+            end
+        end
+
+        local melonScale = melonDisplayHeight / melonTexture:getHeight()
+        local melonWidth = melonTexture:getWidth() * melonScale
+        local melonCenterX = love.graphics.getWidth() - melonWidth / 2 - 105
+        local melonCenterY = love.graphics.getHeight() / 2
+        if pointInRect(
+            x, y,
+            melonCenterX - melonWidth / 2,
+            melonCenterY - melonDisplayHeight / 2,
+            melonWidth,
+            melonDisplayHeight
+        ) then
+            melonPressTime = buttonPressDuration
+        end
 
         -- Check click on "Click Me!" button
         if pointInRect(x, y, clickBtn.x, clickBtn.y, clickBtn.w, clickBtn.h) then
@@ -176,7 +296,7 @@ function love.mousepressed(x, y, button)
         end
 
         if pointInRect(x, y, hirefrogsBtn.x, hirefrogsBtn.y, hirefrogsBtn.w, hirefrogsBtn.h) then
-            if points >= frogCost then
+            if frogCount < frogCap and points >= frogCost then
                 points = points - frogCost
                 frogCount = frogCount + 1
                 frogCost = math.floor(frogCost * 1.3)
@@ -206,10 +326,33 @@ function love.mousepressed(x, y, button)
                 exponentialUpgradeCost = math.floor(exponentialUpgradeCost * 3)
             end
         end
+
+        if pointInRect(x, y, drugFrogsBtn.x, drugFrogsBtn.y, drugFrogsBtn.w, drugFrogsBtn.h) then
+            if drugFrogsCount < drugFrogsCap and points >= drugFrogsCost then
+                points = points - drugFrogsCost
+                drugFrogsCount = drugFrogsCount + 1
+                drugFrogsCost = drugFrogsCost * 4
+            end
+        end
     end
 end
 
 function love.update(dt)
+    for _, animatedButton in ipairs(buttons) do
+        animatedButton.pressTime = math.max(0, (animatedButton.pressTime or 0) - dt)
+    end
+    melonPressTime = math.max(0, melonPressTime - dt)
+
+    backgroundOffsetX = (backgroundOffsetX + dt * 60) % backgroundTexture:getWidth()
+    backgroundOffsetY = (backgroundOffsetY + dt * 24) % backgroundTexture:getHeight()
+    backgroundQuad:setViewport(
+        backgroundOffsetX,
+        backgroundOffsetY,
+        love.graphics.getWidth(),
+        love.graphics.getHeight(),
+        backgroundTexture:getDimensions()
+    )
+
     melonRotation = (melonRotation + dt * math.pi / 4) % (2 * math.pi)
     miniMelonAnimationTime = miniMelonAnimationTime + dt
 
@@ -217,7 +360,11 @@ function love.update(dt)
     while frogTimer >= 1 do
         frogTimer = frogTimer - 1
         if frogCount > 0 then
-            killMelons(frogCount)
+            local frogKills = frogCount
+            if drugFrogsCount > 0 then
+                frogKills = frogKills * frogCount ^ ((frogCount/10) * 0.2 * drugFrogsCount)
+            end
+            killMelons(frogKills)
         end
     end
 
@@ -238,47 +385,69 @@ function love.update(dt)
 end
 
 function love.draw()
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(backgroundTexture, backgroundQuad, 0, 0)
+
     points = math.ceil(points)
     love.graphics.setFont(titleFont)
-    love.graphics.print("Game where you kill melons", 200, 40)
+    love.graphics.print("Game where you kill melons ---------- (Please Full screen)", 40, 40)
 
     love.graphics.setFont(scoreFont)
-    love.graphics.print("Dead Melonports: " .. points, 200, 100)
+    love.graphics.print("Dead Melonports: " .. points, 40, 100)
 
     love.graphics.setFont(bodyFont)
-    love.graphics.print("Per Kill: " .. pointsPerClick, 200, 140)
-    love.graphics.print(string.format("K/S: %.1f", killsPerSecond), 200, 170)
+    love.graphics.print("Per Kill: " .. pointsPerClick, 40, 140)
+    love.graphics.print(string.format("K/S: %.1f", killsPerSecond), 40, 170)
 
     drawButtonTexture(greenButtonTexture, clickBtn)
 
     love.graphics.setColor(1, 1, 1) -- White text
     love.graphics.setFont(buttonFont)
-    love.graphics.printf(clickBtn.text, clickBtn.x, clickBtn.y + 18, clickBtn.w, "center")
+    printfButton(clickBtn.text, clickBtn, 18)
 
     -- 3. Draw "Upgrade" Button
     local upgradeTexture = points >= upgradeCost and greenButtonTexture or grayButtonTexture
     drawButtonTexture(upgradeTexture, upgradeBtn)
 
     love.graphics.setColor(1, 1, 1)
-    love.graphics.printf("Kidnap a melon (" .. upgradeCost .. " kills)", upgradeBtn.x, upgradeBtn.y + 18, upgradeBtn.w, "center")
+    printfButton("Kidnap a melon (" .. upgradeCost .. " kills)", upgradeBtn, 18)
 
-    local frogTexture = points >= frogCost and greenButtonTexture or grayButtonTexture
+    local frogTexture = frogCount < frogCap and points >= frogCost
+        and greenButtonTexture or grayButtonTexture
     drawButtonTexture(frogTexture, hirefrogsBtn)
     love.graphics.setColor(1, 1, 1)
     love.graphics.setFont(buttonFont)
-    love.graphics.printf("Hire Frog", hirefrogsBtn.x, hirefrogsBtn.y + 6, hirefrogsBtn.w, "center")
-    love.graphics.printf("(" .. frogCost .. " kills)", hirefrogsBtn.x, hirefrogsBtn.y + 34, hirefrogsBtn.w, "center")
+    if frogCount >= frogCap then
+        printfButton("Max Frogs", hirefrogsBtn, 18)
+    else
+        printfButton("Hire Frog", hirefrogsBtn, 6)
+        printfButton("(" .. frogCost .. " kills)", hirefrogsBtn, 34)
+    end
 
     local dimondTexture = points >= dimondCost and greenButtonTexture or grayButtonTexture
     drawButtonTexture(dimondTexture, hireDimondsBtn)
     love.graphics.setColor(1, 1, 1)
     love.graphics.setFont(buttonFont)
-    love.graphics.printf("Hire Dimond", hireDimondsBtn.x, hireDimondsBtn.y + 6, hireDimondsBtn.w, "center")
-    love.graphics.printf("(" .. dimondCost .. " kills)", hireDimondsBtn.x, hireDimondsBtn.y + 34, hireDimondsBtn.w, "center")
+    printfButton("Hire Dimond", hireDimondsBtn, 6)
+    printfButton("(" .. dimondCost .. " kills)", hireDimondsBtn, 34)
 
     love.graphics.setFont(bodyFont)
     love.graphics.print("Frogs: " .. frogCount, hirefrogsBtn.x, hirefrogsBtn.y + hirefrogsBtn.h + 10)
     love.graphics.print("Dimonds: " .. dimondCount, hireDimondsBtn.x, hireDimondsBtn.y + hireDimondsBtn.h + 10)
+
+    local drugFrogsTexture = drugFrogsCount < drugFrogsCap and points >= drugFrogsCost
+        and greenButtonTexture or grayButtonTexture
+    drawButtonTexture(drugFrogsTexture, drugFrogsBtn)
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.setFont(buttonFont)
+    if drugFrogsCount >= drugFrogsCap then
+        printfButton("Max Drug Frogs", drugFrogsBtn, 18)
+    else
+        printfButton("Drug Frogs", drugFrogsBtn, 6)
+        printfButton("(" .. drugFrogsCost .. " kills)", drugFrogsBtn, 34)
+    end
+    love.graphics.setFont(bodyFont)
+    love.graphics.print("Drug upgrades: " .. drugFrogsCount, drugFrogsBtn.x, drugFrogsBtn.y + drugFrogsBtn.h + 10)
 
     local duplicateTexture = not duplicateMelonsPurchased and points >= duplicateMelonsCost
         and greenButtonTexture or grayButtonTexture
@@ -286,52 +455,48 @@ function love.draw()
     love.graphics.setFont(buttonFont)
     love.graphics.setColor(1, 1, 1)
     if duplicateMelonsPurchased then
-        love.graphics.printf("Bought", duplicateMelonsBtn.x, duplicateMelonsBtn.y + 18, duplicateMelonsBtn.w, "center")
+        printfButton("Bought", duplicateMelonsBtn, 18)
     else
-        love.graphics.printf("Duplicate Melons", duplicateMelonsBtn.x, duplicateMelonsBtn.y + 6, duplicateMelonsBtn.w, "center")
-        love.graphics.printf("(100 kills)", duplicateMelonsBtn.x, duplicateMelonsBtn.y + 34, duplicateMelonsBtn.w, "center")
+        printfButton("Duplicate Melons", duplicateMelonsBtn, 6)
+        printfButton("(100 kills)", duplicateMelonsBtn, 34)
     end
 
     local exponentialTexture = points >= exponentialUpgradeCost and greenButtonTexture or grayButtonTexture
     drawButtonTexture(exponentialTexture, exponentialBtn)
     love.graphics.setFont(buttonFont)
     love.graphics.setColor(1, 1, 1)
-    love.graphics.printf("Exponential x1.1", exponentialBtn.x, exponentialBtn.y + 6, exponentialBtn.w, "center")
-    love.graphics.printf("(" .. exponentialUpgradeCost .. " kills)", exponentialBtn.x, exponentialBtn.y + 34, exponentialBtn.w, "center")
+    printfButton("Exponential x1.1", exponentialBtn, 6)
+    printfButton("(" .. exponentialUpgradeCost .. " kills)", exponentialBtn, 34)
 
     local melonScale = melonDisplayHeight / melonTexture:getHeight()
     local melonWidth = melonTexture:getWidth() * melonScale
     local melonCenterX = love.graphics.getWidth() - melonWidth / 2 - 105
     local melonCenterY = love.graphics.getHeight() / 2
     love.graphics.setColor(1, 1, 1, 1)
+    local melonPressScale = getPressScale(melonPressTime)
     love.graphics.draw(
         melonTexture,
         melonCenterX,
         melonCenterY,
         melonRotation,
-        melonScale,
-        melonScale,
+        melonScale * melonPressScale,
+        melonScale * melonPressScale,
         melonTexture:getWidth() / 2,
         melonTexture:getHeight() / 2
     )
 
-    local orbitingMelonCount = 0
-    local nextKillMilestone = 10
-    while lifetimeKills >= nextKillMilestone do
-        orbitingMelonCount = orbitingMelonCount + 1
-        nextKillMilestone = nextKillMilestone * 10
-    end
-
     local smallMelonScale = 36 / melonTexture:getHeight()
-    for i = 1, orbitingMelonCount do
-        local phase = 2 * math.pi * (i - 1) / orbitingMelonCount
+    for i, miniMelon in ipairs(orbitingMelons) do
+        local phase = 2 * math.pi * (i - 1) / #orbitingMelons
         local angle = phase + miniMelonAnimationTime * (0.8 + i * 0.12)
         local orbitRadius = 135 + math.sin(miniMelonAnimationTime * 1.5 + phase) * 12
         local spriteRotation = miniMelonAnimationTime * (1.2 + i * 0.2)
+        local verticalOffset = miniMelon.height
+            + math.sin(miniMelonAnimationTime * miniMelon.bobSpeed + miniMelon.bobPhase) * 18
         love.graphics.draw(
             melonTexture,
             melonCenterX + math.cos(angle) * orbitRadius,
-            melonCenterY + math.sin(angle) * orbitRadius,
+            melonCenterY + math.sin(angle) * orbitRadius + verticalOffset,
             spriteRotation,
             smallMelonScale,
             smallMelonScale,
@@ -342,7 +507,9 @@ function love.draw()
 
     local commandY = love.graphics.getHeight() - 48
     local commandWidth = math.max(200, love.graphics.getWidth() - 40)
-    love.graphics.setColor(commandFocused and 0.3 or 0.6, commandFocused and 0.9 or 0.6, commandFocused and 1 or 0.6)
+    love.graphics.setColor(0, 0, 0, 1)
+    love.graphics.rectangle("fill", 20, commandY, commandWidth, 36)
+    love.graphics.setColor(1, 1, 1, 1)
     love.graphics.rectangle("line", 20, commandY, commandWidth, 36)
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.setFont(bodyFont)
