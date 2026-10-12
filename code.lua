@@ -19,6 +19,7 @@ local researchHeadStartRanks = 0
 local researchMultiplyRanks = 0
 local researchExponentRanks = 0
 local doubleProductionResearchPurchased = false
+local buffedMultiplyResearchPurchased = false
 local killMultiplier = 1
 local frogTimer = 0
 local dimondTimer = 0
@@ -73,6 +74,9 @@ local exponentialBtn = { x = 20, y = 280, w = 200, h = 60 }
 local hireDimondsBtn = { x = 20, y = 360, w = 200, h = 60 }
 local drugFrogsBtn = { x = 20, y = 440, w = 200, h = 60 }
 local rebirthBtn = { x = 240, y = 460, w = 200, h = 60 }
+local melonsTabBtn = { x = 0, y = 68, w = 130, h = 44 }
+local researchTabBtn = { x = 0, y = 68, w = 130, h = 44 }
+local currentTab = "melons"
 local headStartMenuBtn = { x = 480, y = 400, w = 105, h = 50 }
 local multiplyMenuBtn = { x = 595, y = 400, w = 105, h = 50 }
 local exponentMenuBtn = { x = 480, y = 460, w = 105, h = 50 }
@@ -93,6 +97,7 @@ for rank = 1, 10 do
     researchExponentButtons[rank] = { x = 110, y = 180 + (rank - 1) * 32, w = 270, h = 27 }
 end
 local doubleProductionResearchButton = { x = 110, y = 190, w = 270, h = 42 }
+local buffedMultiplyResearchButton = { x = 110, y = 190, w = 270, h = 42 }
 local buttons = {
     clickBtn,
     upgradeBtn,
@@ -102,10 +107,13 @@ local buttons = {
     hireDimondsBtn,
     drugFrogsBtn,
     rebirthBtn,
-    headStartMenuBtn,
-    multiplyMenuBtn,
-    exponentMenuBtn,
-    productionMenuBtn
+    melonsTabBtn,
+    researchTabBtn,
+    researchHeadStartButtons[1],
+    researchMultiplyButtons[1],
+    researchExponentButtons[1],
+    doubleProductionResearchButton,
+    buffedMultiplyResearchButton
 }
 local buttonPressDuration = 0.24
 local buttonPressAmount = 0.08
@@ -129,6 +137,9 @@ local melonDisplayHeight = 220
 local orbitingMelons = {}
 
 function love.load()
+    love.graphics.setDefaultFilter("nearest", "nearest")
+    love.graphics.setLineStyle("rough")
+
     titleFont = love.graphics.newFont("assets/PressStart2P-Regular.ttf", 18, "mono")
     scoreFont = love.graphics.newFont("assets/PressStart2P-Regular.ttf", 12, "mono")
     bodyFont = love.graphics.newFont("assets/PressStart2P-Regular.ttf", 10, "mono")
@@ -272,8 +283,45 @@ local function pointInRect(px, py, rx, ry, rw, rh)
     return px >= rx and px <= rx + rw and py >= ry and py <= ry + rh
 end
 
+local function updateTabLayout()
+    local centerX = love.graphics.getWidth() / 2
+    melonsTabBtn.x = centerX - melonsTabBtn.w - 6
+    researchTabBtn.x = centerX + 6
+end
+
+local function updateResearchTreeLayout()
+    local screenWidth = love.graphics.getWidth()
+    local screenHeight = love.graphics.getHeight()
+    local horizontalGap = math.max(16, math.min(36, screenWidth * 0.03))
+    local buttonWidth = math.min(260,
+        (screenWidth - 48 - horizontalGap * 3) / 4)
+    local buttonHeight = math.max(58, math.min(76, screenHeight * 0.11))
+    local treeWidth = buttonWidth * 4 + horizontalGap * 3
+    local left = (screenWidth - treeWidth) / 2
+    local middleY = screenHeight / 2 + 20
+    local branchOffset = math.min(82, math.max(48, (screenHeight - 240) / 2))
+    local categoryButtons = {
+        { button = researchHeadStartButtons[1], column = 0, y = middleY },
+        { button = researchMultiplyButtons[1], column = 1, y = middleY },
+        { button = researchExponentButtons[1], column = 2, y = middleY - branchOffset },
+        { button = doubleProductionResearchButton, column = 2, y = middleY + branchOffset },
+        { button = buffedMultiplyResearchButton, column = 3, y = middleY + branchOffset }
+    }
+
+    for _, item in ipairs(categoryButtons) do
+        item.button.x = left + item.column * (buttonWidth + horizontalGap)
+        item.button.y = item.y - buttonHeight / 2
+        item.button.w = buttonWidth
+        item.button.h = buttonHeight
+    end
+
+    return horizontalGap
+end
+
 local function killMelons(amount)
-    amount = amount * (killMultiplier + researchMultiplyRanks * 0.5)
+    local multiplyResearchBonus = researchMultiplyRanks * 0.5
+        * (buffedMultiplyResearchPurchased and 2 or 1)
+    amount = amount * (killMultiplier + multiplyResearchBonus)
         * (1.1 ^ (exponentialUpgradeCount + researchExponentRanks * 0.1))
     points = points + amount
     lifetimeKills = lifetimeKills + amount
@@ -295,17 +343,21 @@ local function getPassiveProductionMultiplier()
 end
 
 local function isMultiplyResearchUnlocked()
-    return researchHeadStartRanks == #researchHeadStartButtons
+    return researchHeadStartRanks > 0
 end
 
 local function isExponentResearchUnlocked()
     return isMultiplyResearchUnlocked()
-        and researchMultiplyRanks == #researchMultiplyButtons
+        and researchMultiplyRanks > 0
 end
 
 local function isDoubleProductionResearchUnlocked()
-    return isExponentResearchUnlocked()
-        and researchExponentRanks == #researchExponentButtons
+    return isMultiplyResearchUnlocked()
+        and researchMultiplyRanks > 0
+end
+
+local function isBuffedMultiplyResearchUnlocked()
+    return doubleProductionResearchPurchased
 end
 
 local function getPressScale(pressTime)
@@ -527,11 +579,13 @@ local function drawResearchPanel()
     love.graphics.setFont(bodyFont)
     love.graphics.setColor(1, 1, 1, 1)
     if researchTreeSection == "headstart" then
-        love.graphics.print("Unlocked: +" .. researchHeadStartRanks * 5 .. " kills/sec",
+        love.graphics.print("Unlocked: +" .. researchHeadStartRanks * 15 .. " kills/sec",
             panelX + 20, panelY + panelHeight - 34)
     elseif researchTreeSection == "multiply" then
         if isMultiplyResearchUnlocked() then
-            love.graphics.print("Multiplier bonus: +" .. researchMultiplyRanks * 0.5,
+            local multiplyBonus = researchMultiplyRanks * 0.5
+                * (buffedMultiplyResearchPurchased and 2 or 1)
+            love.graphics.print("Multiplier bonus: +" .. multiplyBonus,
                 panelX + 20, panelY + panelHeight - 34)
         else
             love.graphics.print("Locked: complete Headstart first",
@@ -549,8 +603,179 @@ local function drawResearchPanel()
         local status = isDoubleProductionResearchUnlocked()
             and (doubleProductionResearchPurchased and "Passive production doubled"
                 or "Passive production unchanged")
-            or "Locked: complete Exponent first"
+            or "Locked: complete Multiply first"
         love.graphics.print(status, panelX + 20, panelY + panelHeight - 34)
+    end
+end
+
+local function drawResearchTree()
+    local horizontalGap = updateResearchTreeLayout()
+    love.graphics.setFont(bodyFont)
+    love.graphics.setColor(0, 0.4, 1, 1)
+    love.graphics.print("Research: " .. research, 24, 126)
+
+    local headStartButton = researchHeadStartButtons[1]
+    local multiplyButton = researchMultiplyButtons[1]
+    local exponentButton = researchExponentButtons[1]
+    local doubleProductionButton = doubleProductionResearchButton
+    local headStartCenterY = headStartButton.y + headStartButton.h / 2
+    local multiplyCenterY = multiplyButton.y + multiplyButton.h / 2
+    local exponentCenterY = exponentButton.y + exponentButton.h / 2
+    local doubleProductionCenterY = doubleProductionButton.y + doubleProductionButton.h / 2
+    local buffedMultiplyCenterY = buffedMultiplyResearchButton.y
+        + buffedMultiplyResearchButton.h / 2
+    local branchX = multiplyButton.x + multiplyButton.w + horizontalGap / 2
+    love.graphics.setColor(0.85, 0.85, 0.85, 1)
+    love.graphics.setLineWidth(3)
+    love.graphics.line(
+        headStartButton.x + headStartButton.w,
+        headStartCenterY,
+        multiplyButton.x,
+        multiplyCenterY
+    )
+    love.graphics.line(
+        multiplyButton.x + multiplyButton.w,
+        multiplyCenterY,
+        branchX,
+        multiplyCenterY
+    )
+    love.graphics.line(branchX, exponentCenterY, branchX, doubleProductionCenterY)
+    love.graphics.line(branchX, exponentCenterY, exponentButton.x, exponentCenterY)
+    love.graphics.line(branchX, doubleProductionCenterY,
+        doubleProductionButton.x, doubleProductionCenterY)
+    love.graphics.line(
+        doubleProductionButton.x + doubleProductionButton.w,
+        doubleProductionCenterY,
+        buffedMultiplyResearchButton.x,
+        buffedMultiplyCenterY
+    )
+    love.graphics.setLineWidth(1)
+
+    local categories = {
+        {
+            name = "Headstart",
+            ranks = researchHeadStartRanks,
+            maxRanks = #researchHeadStartButtons,
+            effect = "+15/s each tier",
+            unlocked = true,
+            button = researchHeadStartButtons[1]
+        },
+        {
+            name = "Multiply",
+            ranks = researchMultiplyRanks,
+            maxRanks = #researchMultiplyButtons,
+            effect = buffedMultiplyResearchPurchased
+                and "+1.0x each tier" or "+0.5x each tier",
+            unlocked = isMultiplyResearchUnlocked(),
+            button = researchMultiplyButtons[1]
+        },
+        {
+            name = "Exponent",
+            ranks = researchExponentRanks,
+            maxRanks = #researchExponentButtons,
+            effect = "+0.1 exponent each tier",
+            unlocked = isExponentResearchUnlocked(),
+            button = researchExponentButtons[1]
+        },
+        {
+            name = "Double Production",
+            ranks = doubleProductionResearchPurchased and 1 or 0,
+            maxRanks = 1,
+            effect = "x2 passive production",
+            unlocked = isDoubleProductionResearchUnlocked(),
+            button = doubleProductionResearchButton,
+            purchased = doubleProductionResearchPurchased
+        },
+        {
+            name = "Buffed Multiply",
+            ranks = buffedMultiplyResearchPurchased and 1 or 0,
+            maxRanks = 1,
+            effect = "doubles Multiply bonus",
+            unlocked = isBuffedMultiplyResearchUnlocked(),
+            button = buffedMultiplyResearchButton,
+            purchased = buffedMultiplyResearchPurchased,
+            cost = 1
+        }
+    }
+
+    for _, category in ipairs(categories) do
+        local isMaxed = category.ranks >= category.maxRanks
+        local nextRank = category.ranks + 1
+        local cost
+        if not isMaxed then
+            cost = category.cost or 2 ^ (nextRank - 1)
+        end
+        local affordable = category.unlocked and not isMaxed and research >= cost
+        local texture = (category.purchased or isMaxed or affordable)
+            and blueButtonTexture or grayButtonTexture
+        drawButtonTexture(texture, category.button)
+        love.graphics.setFont(bodyFont)
+        love.graphics.setColor(1, 1, 1, 1)
+        local price = cost and (tostring(cost) .. " research") or "MAX"
+        local label = string.format("%s : %d/%d\n%s\nPrice : (%s)",
+            category.name, category.ranks, category.maxRanks, category.effect, price)
+        love.graphics.printf(label, category.button.x + 8,
+            category.button.y + (category.button.h - bodyFont:getHeight() * 3) / 2,
+            category.button.w - 16, "center")
+    end
+end
+
+local function drawTabs()
+    updateTabLayout()
+    local activeTexture = blueButtonTexture
+    local inactiveTexture = grayButtonTexture
+    drawButtonTexture(currentTab == "melons" and activeTexture or inactiveTexture, melonsTabBtn)
+    drawButtonTexture(currentTab == "research" and activeTexture or inactiveTexture, researchTabBtn)
+    love.graphics.setFont(buttonFont)
+    love.graphics.setColor(1, 1, 1, 1)
+    printfButton("Melons", melonsTabBtn, 16)
+    printfButton("Research", researchTabBtn, 16)
+end
+
+local function handleResearchTreeClick(x, y)
+    updateResearchTreeLayout()
+    local function purchaseNextRank(buttonList, purchasedRanks, unlocked)
+        local nextRank = purchasedRanks + 1
+        local researchButton = buttonList[1]
+        if unlocked and nextRank <= #buttonList then
+            local cost = 2 ^ (nextRank - 1)
+            if pointInRect(x, y, researchButton.x, researchButton.y,
+                researchButton.w, researchButton.h) and research >= cost then
+                research = research - cost
+                researchButton.pressTime = buttonPressDuration
+                return nextRank
+            end
+        end
+        return purchasedRanks
+    end
+
+    researchHeadStartRanks = purchaseNextRank(researchHeadStartButtons,
+        researchHeadStartRanks, true)
+    researchMultiplyRanks = purchaseNextRank(researchMultiplyButtons,
+        researchMultiplyRanks, isMultiplyResearchUnlocked())
+    researchExponentRanks = purchaseNextRank(researchExponentButtons,
+        researchExponentRanks, isExponentResearchUnlocked())
+
+    if isDoubleProductionResearchUnlocked()
+        and not doubleProductionResearchPurchased then
+        local researchButton = doubleProductionResearchButton
+        if pointInRect(x, y, researchButton.x, researchButton.y,
+            researchButton.w, researchButton.h) and research >= 1 then
+            research = research - 1
+            doubleProductionResearchPurchased = true
+            researchButton.pressTime = buttonPressDuration
+        end
+    end
+
+    if isBuffedMultiplyResearchUnlocked()
+        and not buffedMultiplyResearchPurchased then
+        local researchButton = buffedMultiplyResearchButton
+        if pointInRect(x, y, researchButton.x, researchButton.y,
+            researchButton.w, researchButton.h) and research >= 1 then
+            research = research - 1
+            buffedMultiplyResearchPurchased = true
+            researchButton.pressTime = buttonPressDuration
+        end
     end
 end
 
@@ -564,58 +789,21 @@ function love.mousepressed(x, y, button)
         end
         commandFocused = false
 
-        if researchTreeOpen then
-            if pointInRect(x, y, researchTreeCloseBtn.x, researchTreeCloseBtn.y,
-                researchTreeCloseBtn.w, researchTreeCloseBtn.h) then
-                researchTreeOpen = false
-                return
-            end
+        updateTabLayout()
+        if pointInRect(x, y, melonsTabBtn.x, melonsTabBtn.y,
+            melonsTabBtn.w, melonsTabBtn.h) then
+            currentTab = "melons"
+            melonsTabBtn.pressTime = buttonPressDuration
+            return
+        elseif pointInRect(x, y, researchTabBtn.x, researchTabBtn.y,
+            researchTabBtn.w, researchTabBtn.h) then
+            currentTab = "research"
+            researchTabBtn.pressTime = buttonPressDuration
+            return
+        end
 
-            if researchTreeSection == "headstart" then
-                local visibleRank = researchHeadStartRanks + 1
-                if visibleRank <= #researchHeadStartButtons then
-                    local researchButton = researchHeadStartButtons[visibleRank]
-                    local cost = 2 ^ (visibleRank - 1)
-                    if pointInRect(x, y, researchButton.x, researchButton.y,
-                        researchButton.w, researchButton.h) and research >= cost then
-                        research = research - cost
-                        researchHeadStartRanks = visibleRank
-                    end
-                end
-            elseif researchTreeSection == "multiply"
-                and isMultiplyResearchUnlocked() then
-                local visibleRank = researchMultiplyRanks + 1
-                if visibleRank <= #researchMultiplyButtons then
-                    local researchButton = researchMultiplyButtons[visibleRank]
-                    local cost = 2 ^ (visibleRank - 1)
-                    if pointInRect(x, y, researchButton.x, researchButton.y,
-                        researchButton.w, researchButton.h) and research >= cost then
-                        research = research - cost
-                        researchMultiplyRanks = visibleRank
-                    end
-                end
-            elseif researchTreeSection == "exponent" then
-                local visibleRank = researchExponentRanks + 1
-                if visibleRank <= #researchExponentButtons then
-                    local researchButton = researchExponentButtons[visibleRank]
-                    local cost = 2 ^ (visibleRank - 1)
-                    if pointInRect(x, y, researchButton.x, researchButton.y,
-                        researchButton.w, researchButton.h) and research >= cost then
-                        research = research - cost
-                        researchExponentRanks = visibleRank
-                    end
-                end
-            elseif researchTreeSection == "production"
-                and isDoubleProductionResearchUnlocked()
-                and not doubleProductionResearchPurchased then
-                local cost = 1
-                if pointInRect(x, y, doubleProductionResearchButton.x,
-                    doubleProductionResearchButton.y, doubleProductionResearchButton.w,
-                    doubleProductionResearchButton.h) and research >= cost then
-                    research = research - cost
-                    doubleProductionResearchPurchased = true
-                end
-            end
+        if currentTab == "research" then
+            handleResearchTreeClick(x, y)
             return
         end
 
@@ -696,24 +884,6 @@ function love.mousepressed(x, y, button)
         if pointInRect(x, y, rebirthBtn.x, rebirthBtn.y, rebirthBtn.w, rebirthBtn.h) then
             rebirth()
         end
-
-        if pointInRect(x, y, headStartMenuBtn.x, headStartMenuBtn.y,
-            headStartMenuBtn.w, headStartMenuBtn.h) then
-            researchTreeOpen = true
-            researchTreeSection = "headstart"
-        elseif pointInRect(x, y, multiplyMenuBtn.x, multiplyMenuBtn.y,
-            multiplyMenuBtn.w, multiplyMenuBtn.h) then
-            researchTreeOpen = true
-            researchTreeSection = "multiply"
-        elseif pointInRect(x, y, exponentMenuBtn.x, exponentMenuBtn.y,
-            exponentMenuBtn.w, exponentMenuBtn.h) then
-            researchTreeOpen = true
-            researchTreeSection = "exponent"
-        elseif pointInRect(x, y, productionMenuBtn.x, productionMenuBtn.y,
-            productionMenuBtn.w, productionMenuBtn.h) then
-            researchTreeOpen = true
-            researchTreeSection = "production"
-        end
     end
 end
 
@@ -760,7 +930,7 @@ function love.update(dt)
     while headStartTimer >= 1 do
         headStartTimer = headStartTimer - 1
         if researchHeadStartRanks > 0 then
-            killMelons(researchHeadStartRanks * 5 * getPassiveProductionMultiplier())
+            killMelons(researchHeadStartRanks * 15 * getPassiveProductionMultiplier())
         end
     end
 
@@ -772,6 +942,22 @@ function love.update(dt)
     end
 end
 
+local function drawCommandBar()
+    local commandY = love.graphics.getHeight() - 48
+    local commandWidth = math.max(200, love.graphics.getWidth() - 40)
+    love.graphics.setColor(0, 0, 0, 1)
+    love.graphics.rectangle("fill", 20, commandY, commandWidth, 36)
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.rectangle("line", 20, commandY, commandWidth, 36)
+    love.graphics.setFont(bodyFont)
+    local displayedCommand = commandInput
+    if displayedCommand == "" and not commandFocused then
+        displayedCommand = "Click to focus"
+    end
+    love.graphics.print(displayedCommand, 28, commandY + 10)
+    love.graphics.print(commandStatus, 20, commandY - bodyFont:getHeight() - 4)
+end
+
 function love.draw()
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.draw(backgroundTexture, backgroundQuad, 0, 0)
@@ -779,6 +965,13 @@ function love.draw()
     points = math.ceil(points)
     love.graphics.setFont(titleFont)
     love.graphics.print("Game where you kill melons ---------- (Please Full screen)", 40, 40)
+
+    drawTabs()
+    if currentTab == "research" then
+        drawResearchTree()
+        drawCommandBar()
+        return
+    end
 
     love.graphics.setFont(scoreFont)
     love.graphics.print("Dead Melonports: " .. points, 40, 100)
@@ -830,7 +1023,6 @@ function love.draw()
     love.graphics.setColor(1, 1, 1)
     printfButton("Rebirth", rebirthBtn, 6)
     printfButton("+" .. rebirthReward .. " research", rebirthBtn, 34)
-    drawResearchMenuButtons()
 
     local drugFrogsTexture = drugFrogsCount < drugFrogsCap and points >= drugFrogsCost
         and greenButtonTexture or grayButtonTexture
@@ -902,20 +1094,5 @@ function love.draw()
         )
     end
 
-    local commandY = love.graphics.getHeight() - 48
-    local commandWidth = math.max(200, love.graphics.getWidth() - 40)
-    love.graphics.setColor(0, 0, 0, 1)
-    love.graphics.rectangle("fill", 20, commandY, commandWidth, 36)
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.rectangle("line", 20, commandY, commandWidth, 36)
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.setFont(bodyFont)
-    local displayedCommand = commandInput
-    if displayedCommand == "" and not commandFocused then
-        displayedCommand = "Click to focus"
-    end
-    love.graphics.print(displayedCommand, 28, commandY + 10)
-    love.graphics.print(commandStatus, 20, commandY - bodyFont:getHeight() - 4)
-
-    drawResearchPanel()
+    drawCommandBar()
 end
