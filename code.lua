@@ -714,11 +714,19 @@ local function drawResearchTree()
         love.graphics.setFont(bodyFont)
         love.graphics.setColor(1, 1, 1, 1)
         local price = cost and (tostring(cost) .. " research") or "MAX"
-        local label = string.format("%s : %d/%d\n%s\nPrice : (%s)",
-            category.name, category.ranks, category.maxRanks, category.effect, price)
-        love.graphics.printf(label, category.button.x + 8,
-            category.button.y + (category.button.h - bodyFont:getHeight() * 3) / 2,
-            category.button.w - 16, "center")
+        local lines = {
+            string.format("%s : %d/%d", category.name, category.ranks, category.maxRanks),
+            category.effect,
+            "Price : (" .. price .. ")"
+        }
+        local lineSpacing = bodyFont:getHeight() + 2
+        local firstLineY = category.button.y
+            + (category.button.h - lineSpacing * #lines) / 2
+        for lineNumber, line in ipairs(lines) do
+            love.graphics.printf(line, category.button.x + 8,
+                firstLineY + (lineNumber - 1) * lineSpacing,
+                category.button.w - 16, "center")
+        end
     end
 end
 

@@ -1,0 +1,51 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    overflow: hidden;
+    background: #151515;
+    color: #f4f4f4;
+    font-family: Arial, sans-serif;
+}
+
+h1 {
+    display: none;
+}
+
+center {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+#loadingCanvas,
+#canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    border: 0;
+}
+
+#canvas {
+    padding: 0;
+    visibility: hidden;
+    image-rendering: pixelated;
+}
+
+footer {
+    display: none;
+}
+
+a {
+    color: #9acded;
+}
+
+button {
+    margin-left: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+}
