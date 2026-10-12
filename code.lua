@@ -121,6 +121,7 @@ local melonPressTime = 0
 
 local titleFont
 local scoreFont
+local resourceFont
 local bodyFont
 local buttonFont
 local greenButtonTexture
@@ -142,6 +143,7 @@ function love.load()
 
     titleFont = love.graphics.newFont("assets/PressStart2P-Regular.ttf", 18, "mono")
     scoreFont = love.graphics.newFont("assets/PressStart2P-Regular.ttf", 12, "mono")
+    resourceFont = love.graphics.newFont("assets/PressStart2P-Regular.ttf", 18, "mono")
     bodyFont = love.graphics.newFont("assets/PressStart2P-Regular.ttf", 10, "mono")
     buttonFont = love.graphics.newFont("assets/PressStart2P-Regular.ttf", 9, "mono")
 
@@ -610,7 +612,7 @@ end
 
 local function drawResearchTree()
     local horizontalGap = updateResearchTreeLayout()
-    love.graphics.setFont(bodyFont)
+    love.graphics.setFont(resourceFont)
     love.graphics.setColor(0, 0.4, 1, 1)
     love.graphics.print("Research: " .. research, 24, 126)
 
@@ -973,7 +975,7 @@ function love.draw()
         return
     end
 
-    love.graphics.setFont(scoreFont)
+    love.graphics.setFont(resourceFont)
     love.graphics.print("Dead Melonports: " .. points, 40, 100)
 
     love.graphics.setFont(bodyFont)
